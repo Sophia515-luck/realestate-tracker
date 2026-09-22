@@ -52,37 +52,36 @@ DATA_FILE = "realestate_data.json"
 HTML_FILE = "index.html"
 
 # ==========================================
-# 2. 네이버 부동산 API 수집 함수 (보강 버전)
+# 2. 네이버 부동산 최신 API 수집 함수
 # ==========================================
 def fetch_naver_articles(complex_no, trade_type="A1"):
-    # realEstateType=APT 추가 및 최신 endpoint 사용
-    url = f"https://m.land.naver.com/complex/getComplexArticleList?mktNo=0&complexNo={complex_no}&realEstateType=APT&tradeType={trade_type}&order=prc_asc&page=1"
+    """
+    new.land.naver.com 최신 API 활용
+    """
+    url = f"https://new.land.naver.com/api/articles/complex/{complex_no}?realEstateType=APT&tradeType={trade_type}&tag=%3A%3A%3A%3A%3A%3A%3A%3A&rentPriceMin=0&rentPriceMax=900000000&priceMin=0&priceMax=900000000&areaMin=0&areaMax=900000000&oldBuildYears=&areaNo=&sameAddressGroup=false&minHouseHoldCount=&maxHouseHoldCount=&showState=false&sort=priceAsc&page=1"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
-        "Accept": "*/*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": f"https://m.land.naver.com/complex/info/{complex_no}",
+        "Referer": f"https://new.land.naver.com/complexes/{complex_no}",
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin"
     }
     
     articles = []
-    
     session = requests.Session()
-    # 세션 쿠키 생성을 위한 프리플라이트 요청
-    try:
-        session.get(f"https://m.land.naver.com/complex/info/{complex_no}", headers=headers, timeout=10)
-    except:
-        pass
 
     for attempt in range(3):
         try:
             res = session.get(url, headers=headers, timeout=15)
             if res.status_code == 200:
                 data = res.json()
-                if "result" in data and data["result"] and "list" in data["result"]:
+                if "articleList" in data:
+                    articles = data["articleList"]
+                    break
+                elif "result" in data and "list" in data["result"]:
                     articles = data["result"]["list"]
                     break
         except Exception as e:
@@ -92,8 +91,11 @@ def fetch_naver_articles(complex_no, trade_type="A1"):
     return articles
 
 def parse_price(price_str):
-    """ '12억 5,000' 형태의 문자열을 만원 단위 정수로 변환 """
+    """ '12억 5,000' 또는 '125000' 형태의 매매가를 만원 단위 정수로 변환 """
     try:
+        if isinstance(price_str, (int, float)):
+            return int(price_str)
+        
         price_str = str(price_str).replace(",", "").strip()
         total = 0
         if "억" in price_str:
@@ -131,8 +133,9 @@ def collect_today_data(previous_history):
         print(f"[{apt['name']}] RAW 수집 매물 수: {len(raw_list)}개")
         
         for item in raw_list:
-            spc2 = str(item.get("spc2", "")) # 전용면적
-            spc1 = str(item.get("spc1", "")) # 공급면적
+            # area2: 전용면적, area1: 공급면적
+            spc2 = str(item.get("area2", item.get("spc2", "")))
+            spc1 = str(item.get("area1", item.get("spc1", "")))
             
             match_area = False
             if not apt.get("targetAreas"):
@@ -143,15 +146,17 @@ def collect_today_data(previous_history):
                         match_area = True
                         break
             
-            # 면적 매칭에 안 걸리더라도 데이터가 너무 적을 경우 예외적 포함
+            # 필터링 조건 완화: 수집 매물이 적을 경우 넓게 포함
             if not match_area and len(raw_list) < 5:
                 match_area = True
 
             if not match_area:
                 continue
 
-            art_no = str(item.get("atclNo", item.get("articleNo", "")))
-            price_str = str(item.get("prc", item.get("price", "")))
+            art_no = str(item.get("articleNo", item.get("atclNo", "")))
+            
+            # 가격 처리 (sameAddrMinPrc / dealOrWarrantPrc 등)
+            price_str = str(item.get("dealOrWarrantPrc", item.get("prc", item.get("price", ""))))
             price_num = parse_price(price_str)
             
             price_diff_str = "-"
@@ -167,7 +172,7 @@ def collect_today_data(previous_history):
             else:
                 price_diff_str = "신규"
 
-            feature_text = f"{item.get('atclNm', '')} {item.get('atclFtrDesc', '')}"
+            feature_text = f"{item.get('articleName', '')} {item.get('articleFeatureDesc', '')} {item.get('atclFtrDesc', '')}"
             found_specials = [kw for kw in SPECIAL_KEYWORDS if kw in feature_text]
             special_note = ", ".join(found_specials) if found_specials else "-"
 
@@ -175,15 +180,15 @@ def collect_today_data(previous_history):
                 "date": today_str,
                 "aptName": apt["name"],
                 "articleNo": art_no,
-                "priceStr": price_str + ("만원" if "억" in price_str or price_str.isdigit() else ""),
+                "priceStr": price_str + ("만원" if ("억" in price_str or price_str.isdigit()) and "만" not in price_str else ""),
                 "priceNum": price_num,
-                "floor": item.get("flrInfo", "-"),
+                "floor": item.get("floorInfo", item.get("flrInfo", "-")),
                 "area": f"{spc2}㎡ (전용)",
-                "realtor": item.get("rltrNm", "자체등록"),
+                "realtor": item.get("realtorName", item.get("rltrNm", "자체등록")),
                 "specialNote": special_note,
                 "priceDiff": price_diff_str,
                 "direction": item.get("direction", "-"),
-                "confirmDate": item.get("atclCfmYmd", "-")
+                "confirmDate": item.get("articleConfirmYmd", item.get("atclCfmYmd", "-"))
             }
             today_records.append(record)
 
@@ -218,10 +223,15 @@ def generate_html_report(history_data):
         for d in dates:
             day_apts = [x for x in history_data[d] if x.get("aptName") == name]
             if day_apts:
-                prices = [x["priceNum"] for x in day_apts]
-                chart_datasets[name]["min"].append(min(prices))
-                chart_datasets[name]["max"].append(max(prices))
-                chart_datasets[name]["avg"].append(int(sum(prices) / len(prices)))
+                prices = [x["priceNum"] for x in day_apts if x["priceNum"] > 0]
+                if prices:
+                    chart_datasets[name]["min"].append(min(prices))
+                    chart_datasets[name]["max"].append(max(prices))
+                    chart_datasets[name]["avg"].append(int(sum(prices) / len(prices)))
+                else:
+                    chart_datasets[name]["min"].append(None)
+                    chart_datasets[name]["max"].append(None)
+                    chart_datasets[name]["avg"].append(None)
             else:
                 chart_datasets[name]["min"].append(None)
                 chart_datasets[name]["max"].append(None)
