@@ -12,37 +12,37 @@ TARGET_APARTS = [
         "name": "행당 신동아",
         "complexNo": "2297",
         "tradeType": "A1",  # 매매
-        "targetAreas": ["76.68", "81.55"]
+        "targetAreas": ["76", "81"] # 소수점 생략하여 유연하게 매칭
     },
     {
         "name": "염리 상록",
         "complexNo": "3326",
         "tradeType": "A1",
-        "targetAreas": ["83.1A", "83.1"]
+        "targetAreas": ["83"]
     },
     {
         "name": "고덕 아남",
         "complexNo": "3175",
         "tradeType": "A1",
-        "targetAreas": ["60.95"]
+        "targetAreas": ["60", "61"]
     },
     {
         "name": "상아 2차 (오금동)",
         "complexNo": "3158",
         "tradeType": "A1",
-        "targetAreas": ["64.11"]
+        "targetAreas": ["64"]
     },
     {
         "name": "양평 한신",
         "complexNo": "3087",
         "tradeType": "A1",
-        "targetAreas": ["83.98"]
+        "targetAreas": ["83", "84"]
     },
     {
         "name": "약수 하이츠",
         "complexNo": "874",
         "tradeType": "A1",
-        "targetAreas": ["80.4"]
+        "targetAreas": ["80", "81"]
     }
 ]
 
@@ -53,7 +53,7 @@ DATA_FILE = "realestate_data.json"
 HTML_FILE = "index.html"
 
 # ==========================================
-# 2. 네이버 부동산 API 수집 함수 (재시도 및 차단방지 적용)
+# 2. 네이버 부동산 API 수집 함수
 # ==========================================
 def fetch_naver_articles(complex_no, trade_type="A1"):
     url = f"https://m.land.naver.com/complex/getComplexArticleList?mktNo=0&complexNo={complex_no}&tradeType={trade_type}&order=prc_asc&page=1"
@@ -69,7 +69,6 @@ def fetch_naver_articles(complex_no, trade_type="A1"):
     }
     
     articles = []
-    # 최대 3회 재시도
     for attempt in range(3):
         try:
             res = requests.get(url, headers=headers, timeout=15)
@@ -80,7 +79,7 @@ def fetch_naver_articles(complex_no, trade_type="A1"):
                     break
         except Exception as e:
             print(f"[{attempt+1}/3] Retry fetching complexNo {complex_no}: {e}")
-            time.sleep(2) # 재시도 전 2초 대기
+            time.sleep(2)
             
     return articles
 
@@ -119,23 +118,29 @@ def collect_today_data(previous_history):
 
     for apt in TARGET_APARTS:
         raw_list = fetch_naver_articles(apt["complexNo"], apt["tradeType"])
-        time.sleep(1) # 요청 간 1초 간격 유휴 시간 추가 (차단 방지)
+        time.sleep(1)
+        
+        print(f"[{apt['name']}] 전체 수집된 매물 수: {len(raw_list)}개")
         
         for item in raw_list:
             spc2 = str(item.get("spc2", "")) # 전용면적
             spc1 = str(item.get("spc1", "")) # 공급면적
             
+            # targetAreas가 비어있거나 매칭되면 포함
             match_area = False
-            for target_area in apt["targetAreas"]:
-                if target_area in spc2 or target_area in spc1:
-                    match_area = True
-                    break
+            if not apt.get("targetAreas"):
+                match_area = True
+            else:
+                for target_area in apt["targetAreas"]:
+                    if target_area in spc2 or target_area in spc1:
+                        match_area = True
+                        break
             
             if not match_area:
                 continue
 
             art_no = str(item.get("atclNo", ""))
-            price_str = item.get("prc", "")
+            price_str = str(item.get("prc", ""))
             price_num = parse_price(price_str)
             
             price_diff_str = "-"
@@ -159,7 +164,7 @@ def collect_today_data(previous_history):
                 "date": today_str,
                 "aptName": apt["name"],
                 "articleNo": art_no,
-                "priceStr": price_str + "만원",
+                "priceStr": price_str + ("만원" if "억" in price_str or price_str.isdigit() else ""),
                 "priceNum": price_num,
                 "floor": item.get("flrInfo", "-"),
                 "area": f"{spc2}㎡ (전용)",
