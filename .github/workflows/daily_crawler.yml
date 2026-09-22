@@ -1,0 +1,38 @@
+name: Daily Real Estate Tracker
+
+on:
+  schedule:
+    # 매일 한국 시간 아침 8시 실행 (UTC 기준 전날 23:00)
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 수동 즉시 실행 가능하게 설정
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 코드 불러오기
+        uses: actions/checkout@v4
+
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 필요 라이브러리 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 jinja2
+
+      - name: 부동산 시세 수집 스크립트 실행
+        run: python main.py
+
+      - name: 수집 결과 저장소에 자동 커밋 및 푸시
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add realestate_data.json index.html
+          git commit -m "Update real estate data and HTML report" || exit 0
+          git push
