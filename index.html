@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>부동산 매물 시세 대시보드</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --primary-color: #2563eb;
+            --text-color: #1e293b;
+            --border-color: #e2e8f0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { font-size: 1.8rem; font-weight: 700; margin-bottom: 20px; text-align: center; }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            border: 1px solid var(--border-color);
+        }
+        .card h3 { font-size: 0.9rem; color: #64748b; margin: 0 0 8px 0; }
+        .card .value { font-size: 1.6rem; font-weight: 700; }
+        .card .sub-info { font-size: 0.85rem; margin-top: 5px; }
+        .up { color: #dc2626; }
+        .down { color: #2563eb; }
+
+        .filter-container {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            background: #e2e8f0;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: 0.2s;
+        }
+        .filter-btn.active {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .chart-box {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            border: 1px solid var(--border-color);
+        }
+
+        .table-container {
+            background: var(--card-bg);
+            border-radius: 12px;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            text-align: left;
+        }
+        th, td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+        th { background-color: #f8fafc; font-weight: 600; color: #475569; }
+        tr:hover { background-color: #f1f5f9; }
+        .badge-special {
+            background-color: #fef2f2;
+            color: #dc2626;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 부동산 매물 자동 추적 대시보드</h1>
+        <p style="text-align:center; color:#64748b; margin-top:-15px; margin-bottom:25px;">최종 업데이트: 2026-09-22</p>
+
+        <div class="summary-grid">
+            <div class="card">
+                <h3>총 추적 매물 수</h3>
+                <div class="value">0개</div>
+                <div class="sub-info">전일 대비: <span class="">0개</span></div>
+            </div>
+            <div class="card">
+                <h3>전체 평균 매매가</h3>
+                <div class="value">0만원</div>
+                <div class="sub-info">전일 대비: <span class="">0만원</span></div>
+            </div>
+            <div class="card">
+                <h3>추적 아파트 단지</h3>
+                <div class="value">6개 단지</div>
+                <div class="sub-info">매매 전용면적 기준 필터링</div>
+            </div>
+        </div>
+
+        <div class="filter-container">
+            <button class="filter-btn active" onclick="filterApt('ALL', this)">전체 보기</button> <button class="filter-btn" onclick="filterApt('고덕 아남', this)">고덕 아남</button> <button class="filter-btn" onclick="filterApt('상아 2차 (오금동)', this)">상아 2차 (오금동)</button> <button class="filter-btn" onclick="filterApt('약수 하이츠', this)">약수 하이츠</button> <button class="filter-btn" onclick="filterApt('양평 한신', this)">양평 한신</button> <button class="filter-btn" onclick="filterApt('염리 상록', this)">염리 상록</button> <button class="filter-btn" onclick="filterApt('행당 신동아', this)">행당 신동아</button>
+        </div>
+
+        <div class="chart-box">
+            <h3 id="chart-title">📈 일자별 가격 추이 (전체 평균가)</h3>
+            <canvas id="priceChart" height="90"></canvas>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>수집 일자</th>
+                        <th>아파트명</th>
+                        <th>매매가</th>
+                        <th>전일 대비</th>
+                        <th>층 / 향</th>
+                        <th>특이사항</th>
+                        <th>공인중개사</th>
+                        <th>매물번호</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const rawHistory = {"2026-09-22": []};
+        const chartLabels = ["2026-09-22"];
+        const chartDatasets = {"고덕 아남": {"min": [null], "max": [null], "avg": [null]}, "상아 2차 (오금동)": {"min": [null], "max": [null], "avg": [null]}, "약수 하이츠": {"min": [null], "max": [null], "avg": [null]}, "양평 한신": {"min": [null], "max": [null], "avg": [null]}, "염리 상록": {"min": [null], "max": [null], "avg": [null]}, "행당 신동아": {"min": [null], "max": [null], "avg": [null]}};
+
+        let currentFilter = 'ALL';
+        let priceChart = null;
+
+        function renderTable(filterName) {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+
+            const dates = Object.keys(rawHistory).sort().reverse();
+            
+            dates.forEach(d => {
+                rawHistory[d].forEach(item => {
+                    if (filterName !== 'ALL' && item.aptName !== filterName) return;
+
+                    const tr = document.createElement('tr');
+                    
+                    let diffClass = '';
+                    if (item.priceDiff && item.priceDiff.includes('▲')) diffClass = 'up';
+                    else if (item.priceDiff && item.priceDiff.includes('▼')) diffClass = 'down';
+
+                    const specialHtml = (item.specialNote && item.specialNote !== '-') 
+                        ? `<span class="badge-special">${item.specialNote}</span>` 
+                        : '-';
+
+                    tr.innerHTML = `
+                        <td>${item.date}</td>
+                        <td><b>${item.aptName}</b></td>
+                        <td><b>${item.priceStr}</b></td>
+                        <td class="${diffClass}">${item.priceDiff}</td>
+                        <td>${item.floor} / ${item.direction}</td>
+                        <td>${specialHtml}</td>
+                        <td>${item.realtor}</td>
+                        <td><a href="https://m.land.naver.com/article/info/${item.articleNo}" target="_blank" style="color:#2563eb; text-decoration:none;">${item.articleNo}</a></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            });
+        }
+
+        function renderChart(filterName) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            if (priceChart) priceChart.destroy();
+
+            let datasets = [];
+
+            if (filterName === 'ALL') {
+                document.getElementById('chart-title').innerText = '📈 단지별 평균 매매가 추이 (만원)';
+                const colors = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#9333ea', '#0891b2'];
+                Object.keys(chartDatasets).forEach((name, idx) => {
+                    datasets.push({
+                        label: name,
+                        data: chartDatasets[name].avg,
+                        borderColor: colors[idx % colors.length],
+                        tension: 0.2,
+                        fill: false
+                    });
+                });
+            } else {
+                document.getElementById('chart-title').innerText = `📈 ${filterName} 최저 / 최고 / 평균가 추이 (만원)`;
+                datasets = [
+                    { label: '최고가', data: chartDatasets[filterName].max, borderColor: '#dc2626', backgroundColor: '#fef2f2', tension: 0.2 },
+                    { label: '평균가', data: chartDatasets[filterName].avg, borderColor: '#2563eb', tension: 0.2 },
+                    { label: '최저가', data: chartDatasets[filterName].min, borderColor: '#16a34a', tension: 0.2 }
+                ];
+            }
+
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: chartLabels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom' } },
+                    scales: { y: { beginAtZero: false } }
+                }
+            });
+        }
+
+        function filterApt(aptName, btn) {
+            currentFilter = aptName;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            renderTable(aptName);
+            renderChart(aptName);
+        }
+
+        window.onload = function() {
+            renderTable('ALL');
+            renderChart('ALL');
+        };
+    </script>
+</body>
+</html>
