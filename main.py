@@ -1,6 +1,7 @@
 import os
 import json
 import datetime
+import time
 import requests
 
 # ==========================================
@@ -52,25 +53,35 @@ DATA_FILE = "realestate_data.json"
 HTML_FILE = "index.html"
 
 # ==========================================
-# 2. 네이버 부동산 API 수집 함수
+# 2. 네이버 부동산 API 수집 함수 (재시도 및 차단방지 적용)
 # ==========================================
 def fetch_naver_articles(complex_no, trade_type="A1"):
     url = f"https://m.land.naver.com/complex/getComplexArticleList?mktNo=0&complexNo={complex_no}&tradeType={trade_type}&order=prc_asc&page=1"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-        "Referer": f"https://m.land.naver.com/complex/info/{complex_no}"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": f"https://m.land.naver.com/complex/info/{complex_no}",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin"
     }
     
     articles = []
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            if "result" in data and "list" in data["result"]:
-                articles = data["result"]["list"]
-    except Exception as e:
-        print(f"Error fetching complexNo {complex_no}: {e}")
-        
+    # 최대 3회 재시도
+    for attempt in range(3):
+        try:
+            res = requests.get(url, headers=headers, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                if "result" in data and "list" in data["result"]:
+                    articles = data["result"]["list"]
+                    break
+        except Exception as e:
+            print(f"[{attempt+1}/3] Retry fetching complexNo {complex_no}: {e}")
+            time.sleep(2) # 재시도 전 2초 대기
+            
     return articles
 
 def parse_price(price_str):
@@ -108,6 +119,7 @@ def collect_today_data(previous_history):
 
     for apt in TARGET_APARTS:
         raw_list = fetch_naver_articles(apt["complexNo"], apt["tradeType"])
+        time.sleep(1) # 요청 간 1초 간격 유휴 시간 추가 (차단 방지)
         
         for item in raw_list:
             spc2 = str(item.get("spc2", "")) # 전용면적
@@ -180,7 +192,7 @@ def generate_html_report(history_data):
     avg_price_prev = int(sum(x["priceNum"] for x in prev_items) / total_count_prev) if total_count_prev > 0 else 0
     price_diff = avg_price_latest - avg_price_prev
 
-    apt_names = sorted(list(set(x["aptName"] for x in TARGET_APARTS)))
+    apt_names = sorted(list(set(x["name"] for x in TARGET_APARTS)))
 
     chart_labels = dates
     chart_datasets = {}
@@ -188,7 +200,7 @@ def generate_html_report(history_data):
     for name in apt_names:
         chart_datasets[name] = {"min": [], "max": [], "avg": []}
         for d in dates:
-            day_apts = [x for x in history_data[d] if x["aptName"] == name]
+            day_apts = [x for x in history_data[d] if x.get("aptName") == name]
             if day_apts:
                 prices = [x["priceNum"] for x in day_apts]
                 chart_datasets[name]["min"].append(min(prices))
@@ -199,13 +211,11 @@ def generate_html_report(history_data):
                 chart_datasets[name]["max"].append(None)
                 chart_datasets[name]["avg"].append(None)
 
-    # D/B 카드 표시 레이블 설정
     count_diff_class = "up" if count_diff > 0 else ("down" if count_diff < 0 else "")
     count_diff_sign = "+" if count_diff > 0 else ""
     price_diff_class = "up" if price_diff > 0 else ("down" if price_diff < 0 else "")
     price_diff_sign = "+" if price_diff > 0 else ""
 
-    # 필터 버튼 HTML 생성
     filter_buttons = '<button class="filter-btn active" onclick="filterApt(\'ALL\', this)">전체 보기</button>'
     for name in apt_names:
         filter_buttons += f' <button class="filter-btn" onclick="filterApt(\'{name}\', this)">{name}</button>'
@@ -385,10 +395,10 @@ def generate_html_report(history_data):
                     const tr = document.createElement('tr');
                     
                     let diffClass = '';
-                    if (item.priceDiff.includes('▲')) diffClass = 'up';
-                    else if (item.priceDiff.includes('▼')) diffClass = 'down';
+                    if (item.priceDiff && item.priceDiff.includes('▲')) diffClass = 'up';
+                    else if (item.priceDiff && item.priceDiff.includes('▼')) diffClass = 'down';
 
-                    const specialHtml = item.specialNote !== '-' 
+                    const specialHtml = (item.specialNote && item.specialNote !== '-') 
                         ? `<span class="badge-special">${{item.specialNote}}</span>` 
                         : '-';
 
