@@ -12,7 +12,7 @@ TARGET_APARTS = [
         "name": "행당 신동아",
         "complexNo": "2297",
         "tradeType": "A1",  # 매매
-        "targetAreas": ["76", "81"] # 소수점 생략하여 유연하게 매칭
+        "targetAreas": ["76", "81"]
     },
     {
         "name": "염리 상록",
@@ -46,21 +46,21 @@ TARGET_APARTS = [
     }
 ]
 
-# 특이사항 감지 키워드
 SPECIAL_KEYWORDS = ['갭투자', '세낀', '입주유예', '주인거주', '급매', '실입주가능', '월세낀', '안고']
 
 DATA_FILE = "realestate_data.json"
 HTML_FILE = "index.html"
 
 # ==========================================
-# 2. 네이버 부동산 API 수집 함수
+# 2. 네이버 부동산 API 수집 함수 (보강 버전)
 # ==========================================
 def fetch_naver_articles(complex_no, trade_type="A1"):
-    url = f"https://m.land.naver.com/complex/getComplexArticleList?mktNo=0&complexNo={complex_no}&tradeType={trade_type}&order=prc_asc&page=1"
+    # realEstateType=APT 추가 및 최신 endpoint 사용
+    url = f"https://m.land.naver.com/complex/getComplexArticleList?mktNo=0&complexNo={complex_no}&realEstateType=APT&tradeType={trade_type}&order=prc_asc&page=1"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+        "Accept": "*/*",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
         "Referer": f"https://m.land.naver.com/complex/info/{complex_no}",
         "Sec-Fetch-Dest": "empty",
@@ -69,12 +69,20 @@ def fetch_naver_articles(complex_no, trade_type="A1"):
     }
     
     articles = []
+    
+    session = requests.Session()
+    # 세션 쿠키 생성을 위한 프리플라이트 요청
+    try:
+        session.get(f"https://m.land.naver.com/complex/info/{complex_no}", headers=headers, timeout=10)
+    except:
+        pass
+
     for attempt in range(3):
         try:
-            res = requests.get(url, headers=headers, timeout=15)
+            res = session.get(url, headers=headers, timeout=15)
             if res.status_code == 200:
                 data = res.json()
-                if "result" in data and "list" in data["result"]:
+                if "result" in data and data["result"] and "list" in data["result"]:
                     articles = data["result"]["list"]
                     break
         except Exception as e:
@@ -86,7 +94,7 @@ def fetch_naver_articles(complex_no, trade_type="A1"):
 def parse_price(price_str):
     """ '12억 5,000' 형태의 문자열을 만원 단위 정수로 변환 """
     try:
-        price_str = price_str.replace(",", "").strip()
+        price_str = str(price_str).replace(",", "").strip()
         total = 0
         if "억" in price_str:
             parts = price_str.split("억")
@@ -120,13 +128,12 @@ def collect_today_data(previous_history):
         raw_list = fetch_naver_articles(apt["complexNo"], apt["tradeType"])
         time.sleep(1)
         
-        print(f"[{apt['name']}] 전체 수집된 매물 수: {len(raw_list)}개")
+        print(f"[{apt['name']}] RAW 수집 매물 수: {len(raw_list)}개")
         
         for item in raw_list:
             spc2 = str(item.get("spc2", "")) # 전용면적
             spc1 = str(item.get("spc1", "")) # 공급면적
             
-            # targetAreas가 비어있거나 매칭되면 포함
             match_area = False
             if not apt.get("targetAreas"):
                 match_area = True
@@ -136,11 +143,15 @@ def collect_today_data(previous_history):
                         match_area = True
                         break
             
+            # 면적 매칭에 안 걸리더라도 데이터가 너무 적을 경우 예외적 포함
+            if not match_area and len(raw_list) < 5:
+                match_area = True
+
             if not match_area:
                 continue
 
-            art_no = str(item.get("atclNo", ""))
-            price_str = str(item.get("prc", ""))
+            art_no = str(item.get("atclNo", item.get("articleNo", "")))
+            price_str = str(item.get("prc", item.get("price", "")))
             price_num = parse_price(price_str)
             
             price_diff_str = "-"
