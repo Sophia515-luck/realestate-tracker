@@ -2,7 +2,6 @@ import os
 import json
 import datetime
 import requests
-from bs4 import BeautifulSoup
 
 # ==========================================
 # 1. 수집 대상 아파트 단지 및 설정
@@ -99,7 +98,6 @@ def collect_today_data(previous_history):
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     today_records = []
 
-    # 이전 가장 최근 날짜의 매물 가격 맵 생성 (가격 변동 비교용)
     last_price_map = {}
     if previous_history:
         latest_date = max(previous_history.keys())
@@ -115,7 +113,6 @@ def collect_today_data(previous_history):
             spc2 = str(item.get("spc2", "")) # 전용면적
             spc1 = str(item.get("spc1", "")) # 공급면적
             
-            # 지정된 면적 조건 필터링
             match_area = False
             for target_area in apt["targetAreas"]:
                 if target_area in spc2 or target_area in spc1:
@@ -129,7 +126,6 @@ def collect_today_data(previous_history):
             price_str = item.get("prc", "")
             price_num = parse_price(price_str)
             
-            # 가격 변동 계산
             price_diff_str = "-"
             if art_no in last_price_map:
                 prev_price = last_price_map[art_no]
@@ -143,7 +139,6 @@ def collect_today_data(previous_history):
             else:
                 price_diff_str = "신규"
 
-            # 특이사항 검출
             feature_text = f"{item.get('atclNm', '')} {item.get('atclFtrDesc', '')}"
             found_specials = [kw for kw in SPECIAL_KEYWORDS if kw in feature_text]
             special_note = ", ".join(found_specials) if found_specials else "-"
@@ -177,7 +172,6 @@ def generate_html_report(history_data):
     latest_items = history_data.get(latest_date, [])
     prev_items = history_data.get(prev_date, []) if prev_date else []
 
-    # 전체 통계 계산
     total_count_latest = len(latest_items)
     total_count_prev = len(prev_items)
     count_diff = total_count_latest - total_count_prev
@@ -186,10 +180,8 @@ def generate_html_report(history_data):
     avg_price_prev = int(sum(x["priceNum"] for x in prev_items) / total_count_prev) if total_count_prev > 0 else 0
     price_diff = avg_price_latest - avg_price_prev
 
-    # 아파트 목록 추출
     apt_names = sorted(list(set(x["aptName"] for x in TARGET_APARTS)))
 
-    # 차트용 데이터 가공 (일자별 아파트 최저/최고/평균가)
     chart_labels = dates
     chart_datasets = {}
     
@@ -206,6 +198,17 @@ def generate_html_report(history_data):
                 chart_datasets[name]["min"].append(None)
                 chart_datasets[name]["max"].append(None)
                 chart_datasets[name]["avg"].append(None)
+
+    # D/B 카드 표시 레이블 설정
+    count_diff_class = "up" if count_diff > 0 else ("down" if count_diff < 0 else "")
+    count_diff_sign = "+" if count_diff > 0 else ""
+    price_diff_class = "up" if price_diff > 0 else ("down" if price_diff < 0 else "")
+    price_diff_sign = "+" if price_diff > 0 else ""
+
+    # 필터 버튼 HTML 생성
+    filter_buttons = '<button class="filter-btn active" onclick="filterApt(\'ALL\', this)">전체 보기</button>'
+    for name in apt_names:
+        filter_buttons += f' <button class="filter-btn" onclick="filterApt(\'{name}\', this)">{name}</button>'
 
     html_content = f"""<!DOCTYPE html>
 <html lang="ko">
@@ -232,7 +235,6 @@ def generate_html_report(history_data):
         .container {{ max-width: 1200px; margin: 0 auto; }}
         h1 {{ font-size: 1.8rem; font-weight: 700; margin-bottom: 20px; text-align: center; }}
         
-        /* 요약 카드 D/B */
         .summary-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -252,7 +254,6 @@ def generate_html_report(history_data):
         .up {{ color: #dc2626; }}
         .down {{ color: #2563eb; }}
 
-        /* 필터 버튼 */
         .filter-container {{
             display: flex;
             gap: 10px;
@@ -274,7 +275,6 @@ def generate_html_report(history_data):
             color: white;
         }}
 
-        /* 차트 영역 */
         .chart-box {{
             background: var(--card-bg);
             padding: 20px;
@@ -283,7 +283,6 @@ def generate_html_report(history_data):
             border: 1px solid var(--border-color);
         }}
 
-        /* 테이블 */
         .table-container {{
             background: var(--card-bg);
             border-radius: 12px;
@@ -318,17 +317,16 @@ def generate_html_report(history_data):
         <h1>📊 부동산 매물 자동 추적 대시보드</h1>
         <p style="text-align:center; color:#64748b; margin-top:-15px; margin-bottom:25px;">최종 업데이트: {latest_date}</p>
 
-        <!-- 최상단 DB 요약 카드 -->
         <div class="summary-grid">
             <div class="card">
                 <h3>총 추적 매물 수</h3>
                 <div class="value">{total_count_latest}개</div>
-                <div class="sub-info">전일 대비: <span class="{ 'up' if count_diff > 0 else 'down' if count_diff < 0 else '' }">{ '+' if count_diff > 0 else ''}{count_diff}개</span></div>
+                <div class="sub-info">전일 대비: <span class="{count_diff_class}">{count_diff_sign}{count_diff}개</span></div>
             </div>
             <div class="card">
                 <h3>전체 평균 매매가</h3>
                 <div class="value">{avg_price_latest:,}만원</div>
-                <div class="sub-info">전일 대비: <span class="{ 'up' if price_diff > 0 else 'down' if price_diff < 0 else '' }">{ '+' if price_diff > 0 else ''}{price_diff:,}만원</span></div>
+                <div class="sub-info">전일 대비: <span class="{price_diff_class}">{price_diff_sign}{price_diff:,}만원</span></div>
             </div>
             <div class="card">
                 <h3>추적 아파트 단지</h3>
@@ -337,19 +335,15 @@ def generate_html_report(history_data):
             </div>
         </div>
 
-        <!-- 아파트 선택 필터 버튼 -->
         <div class="filter-container">
-            <button class="filter-btn active" onclick="filterApt('ALL', this)">전체 보기</button>
-            {' '.join([f'<button class="filter-btn" onclick="filterApt(\'{name}\', this)">{name}</button>' for name in apt_names])}
+            {filter_buttons}
         </div>
 
-        <!-- 차트 영역 -->
         <div class="chart-box">
             <h3 id="chart-title">📈 일자별 가격 추이 (전체 평균가)</h3>
             <canvas id="priceChart" height="90"></canvas>
         </div>
 
-        <!-- 매물 상세 누적 테이블 -->
         <div class="table-container">
             <table>
                 <thead>
@@ -382,7 +376,7 @@ def generate_html_report(history_data):
             const tbody = document.getElementById('table-body');
             tbody.innerHTML = '';
 
-            const dates = Object.keys(rawHistory).sort().reverse(); // 최근 날짜순
+            const dates = Object.keys(rawHistory).sort().reverse();
             
             dates.forEach(d => {{
                 rawHistory[d].forEach(item => {{
@@ -461,7 +455,6 @@ def generate_html_report(history_data):
             renderChart(aptName);
         }}
 
-        // 초기 실행
         window.onload = function() {{
             renderTable('ALL');
             renderChart('ALL');
@@ -477,7 +470,6 @@ def generate_html_report(history_data):
 # 5. 메인 실행부
 # ==========================================
 if __name__ == "__main__":
-    # 기존 누적 데이터 불러오기
     history_data = {}
     if os.path.exists(DATA_FILE):
         try:
@@ -486,16 +478,11 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"JSON 읽기 오류: {e}")
 
-    # 오늘 데이터 수집
     today_str, today_records = collect_today_data(history_data)
-    
-    # 오늘 데이터 업데이트 (Append)
     history_data[today_str] = today_records
 
-    # JSON 저장
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(history_data, f, ensure_ascii=False, indent=2)
 
-    # HTML 리포트 생성
     generate_html_report(history_data)
-    print(f"[{today_str}] 수집 완 및 {HTML_FILE} 리포트 생성 성공! (매물 수: {len(today_records)}개)")
+    print(f"[{today_str}] 수집 완료 및 {HTML_FILE} 리포트 생성 성공! (매물 수: {len(today_records)}개)")
